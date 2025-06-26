@@ -1,3 +1,3 @@
 Streamlit
 Python
-PyMuPDF
+pymupdf
