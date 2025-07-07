@@ -7,6 +7,10 @@ import os
 
 # === PDF-Verarbeitung ===
 def extract_questions_with_colors(pdf_file):
+    import fitz  # lokal importieren, falls nötig
+    import re
+    import random
+
     if isinstance(pdf_file, str):
         doc = fitz.open(pdf_file)  # File path
     else:
@@ -18,10 +22,9 @@ def extract_questions_with_colors(pdf_file):
     full_answer_parts = []
     collecting_answer = False
     collecting_question = False
-
-    allowed_fonts = {"Aptos", "ArialMT", "Wingdings-Regular", "Aptos-Bold"}
-    disallowed_color = 7631988
     stop_collecting_display = False
+    disallowed_color = 7631988
+    question_counter = 0  # interne Zählung
 
     for page in doc:
         blocks = page.get_text("dict")["blocks"]
@@ -29,7 +32,7 @@ def extract_questions_with_colors(pdf_file):
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                spans = [s for s in line.get("spans", []) if s["font"] in allowed_fonts]
+                spans = line.get("spans", [])
                 if not spans:
                     continue
                 line_text = "".join(s["text"] for s in spans).strip()
@@ -47,9 +50,12 @@ def extract_questions_with_colors(pdf_file):
                                 "correct": any(c != 0 for _, c in full_answer_parts)
                             })
                         questions.append(current_question)
+
+                    question_counter += 1
                     current_question = {
                         "question": q_match.group(2).strip(),
-                        "answers": []
+                        "answers": [],
+                        "id": question_counter
                     }
                     display_answer_parts = []
                     full_answer_parts = []
