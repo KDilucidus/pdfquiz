@@ -2,19 +2,21 @@ import fitz  # PyMuPDF
 import re
 import random
 import streamlit as st
-import os
 
+# === Ligatur-Fix ===
+def normalize_ligatures(text):
+    return (text.replace("ﬀ", "ff")
+                .replace("ﬁ", "fi")
+                .replace("ﬂ", "fl")
+                .replace("ﬃ", "ffi")
+                .replace("ﬄ", "ffl"))
 
 # === PDF-Verarbeitung ===
 def extract_questions_with_colors(pdf_file):
-    import fitz  # lokal importieren, falls nötig
-    import re
-    import random
-
     if isinstance(pdf_file, str):
-        doc = fitz.open(pdf_file)  # File path
+        doc = fitz.open(pdf_file)
     else:
-        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")  # Uploaded BytesIO
+        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
 
     questions = []
     current_question = None
@@ -24,7 +26,7 @@ def extract_questions_with_colors(pdf_file):
     collecting_question = False
     stop_collecting_display = False
     disallowed_color = 7631988
-    question_counter = 0  # interne Zählung
+    question_counter = 0
 
     for page in doc:
         blocks = page.get_text("dict")["blocks"]
@@ -35,7 +37,7 @@ def extract_questions_with_colors(pdf_file):
                 spans = line.get("spans", [])
                 if not spans:
                     continue
-                line_text = "".join(s["text"] for s in spans).strip()
+                line_text = normalize_ligatures("".join(s["text"] for s in spans).strip())
                 if not line_text:
                     continue
 
@@ -47,13 +49,13 @@ def extract_questions_with_colors(pdf_file):
                             current_question["answers"].append({
                                 "display_parts": display_answer_parts,
                                 "full_parts": full_answer_parts,
-                                "correct": any(c != 0 for _, c in full_answer_parts)
+                                "correct": any(c != 0 for _, c in display_answer_parts)  # fix
                             })
                         questions.append(current_question)
 
                     question_counter += 1
                     current_question = {
-                        "question": q_match.group(2).strip(),
+                        "question": normalize_ligatures(q_match.group(2).strip()),
                         "answers": [],
                         "id": question_counter
                     }
@@ -70,18 +72,20 @@ def extract_questions_with_colors(pdf_file):
                         current_question["answers"].append({
                             "display_parts": display_answer_parts,
                             "full_parts": full_answer_parts,
-                            "correct": any(c != 0 for _, c in full_answer_parts)
+                            "correct": any(c != 0 for _, c in display_answer_parts)  # fix
                         })
                     display_answer_parts = []
                     full_answer_parts = []
                     for span in spans:
-                        if span["text"].strip() and span["color"] != disallowed_color:
-                            full_answer_parts.append((span["text"].strip(), span["color"]))
+                        text = normalize_ligatures(span["text"].strip())
+                        if text and span["color"] != disallowed_color:
+                            full_answer_parts.append((text, span["color"]))
 
                     temp_display_parts = []
                     for text, color in full_answer_parts:
                         if "->" in text or "→" in text:
-                            temp_display_parts.append((text.split("->")[0].split("→")[0].strip(), color))
+                            before_arrow = text.split("->")[0].split("→")[0].strip()
+                            temp_display_parts.append((before_arrow, color))
                             stop_collecting_display = True
                             break
                         else:
@@ -94,15 +98,17 @@ def extract_questions_with_colors(pdf_file):
 
                 if collecting_question and current_question:
                     current_question["question"] += " " + line_text
-                elif collecting_answer and display_answer_parts is not None and full_answer_parts is not None:
+                elif collecting_answer:
                     for span in spans:
-                        if span["text"].strip() and span["color"] != disallowed_color:
-                            full_answer_parts.append((span["text"].strip(), span["color"]))
+                        text = normalize_ligatures(span["text"].strip())
+                        if text and span["color"] != disallowed_color:
+                            full_answer_parts.append((text, span["color"]))
                     if not stop_collecting_display:
                         for span in spans:
-                            text = span["text"].strip()
+                            text = normalize_ligatures(span["text"].strip())
                             if "->" in text or "→" in text:
-                                display_answer_parts.append((text.split("->")[0].split("→")[0].strip(), span["color"]))
+                                before_arrow = text.split("->")[0].split("→")[0].strip()
+                                display_answer_parts.append((before_arrow, span["color"]))
                                 stop_collecting_display = True
                                 break
                             else:
@@ -113,13 +119,12 @@ def extract_questions_with_colors(pdf_file):
             current_question["answers"].append({
                 "display_parts": display_answer_parts,
                 "full_parts": full_answer_parts,
-                "correct": any(c != 0 for _, c in full_answer_parts)
+                "correct": any(c != 0 for _, c in display_answer_parts)  # fix
             })
         questions.append(current_question)
 
     random.shuffle(questions)
     return questions
-
 
 # === Hilfsfunktionen ===
 def int_to_rgb(color_int):
@@ -148,6 +153,7 @@ def main():
         st.session_state.index = 0
         st.session_state.score = 0
         st.session_state.wrong = 0
+        st.session_state.answered = 0
         st.session_state.submitted = False
 
     questions = st.session_state.questions
@@ -160,11 +166,17 @@ def main():
         return
 
     q = questions[st.session_state.index]
-    st.subheader(f"Frage {st.session_state.index + 1}: {q['question']}")
+    total = len(questions)
+    current = st.session_state.index + 1
+    correct = st.session_state.score
+    answered = st.session_state.answered
+
+    st.markdown(f"### 🧠 Frage {current} von {total}  |  ✅ {correct} von {answered} richtig beantwortet")
+    st.subheader(q["question"])
 
     selected_options = []
     for i, a in enumerate(q["answers"]):
-        answer_text = " ".join(text for text, _ in a["display_parts"])
+        answer_text = " ".join(normalize_ligatures(t) for t, _ in a["display_parts"])
         selected = st.checkbox(answer_text, key=f"{st.session_state.index}_{i}")
         selected_options.append((selected, a))
 
@@ -175,24 +187,30 @@ def main():
         selected_set = {tuple(a["display_parts"]) for selected, a in selected_options if selected}
         correct_set = {tuple(a["display_parts"]) for a in q["answers"] if a["correct"]}
 
-        if selected_set == correct_set:
-            st.success("✅ Richtig!")
-            st.session_state.score += 1
+        if not st.session_state.get(f"answered_{st.session_state.index}", False):
+            st.session_state.answered += 1
+            st.session_state[f"answered_{st.session_state.index}"] = True
+
+            if selected_set == correct_set:
+                st.success("✅ Richtig!")
+                st.session_state.score += 1
+            else:
+                st.error("❌ Falsch.")
+                st.session_state.wrong += 1
         else:
-            st.error("❌ Falsch.")
-            st.session_state.wrong += 1
+            st.info("✅ Diese Frage wurde bereits bewertet.")
 
         st.markdown("### 🔍 Lösung:")
         for a in q["answers"]:
             colored_text = " ".join(
-                f"<span style='color:{int_to_hex(c)}'>{t}</span>" for t, c in a["full_parts"]
+                f"<span style='color:{int_to_hex(c)}'>{normalize_ligatures(t)}</span>" for t, c in a["full_parts"]
             )
             st.markdown(f"- {colored_text}", unsafe_allow_html=True)
 
         if st.button("➡️ Nächste Frage"):
             st.session_state.index += 1
             st.session_state.submitted = False
-
+            st.rerun()
 
 if __name__ == "__main__":
     main()
