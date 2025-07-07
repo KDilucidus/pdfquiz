@@ -18,7 +18,6 @@ def extract_questions_with_colors(pdf_file):
     full_answer_parts = []
     collecting_answer = False
     collecting_question = False
-    start_found = False
 
     allowed_fonts = {"Aptos", "ArialMT", "Wingdings-Regular", "Aptos-Bold"}
     disallowed_color = 7631988
@@ -36,12 +35,6 @@ def extract_questions_with_colors(pdf_file):
                 line_text = "".join(s["text"] for s in spans).strip()
                 if not line_text:
                     continue
-
-                if not start_found:
-                    if re.match(r"^1\)\s*", line_text) or "Synapsen" in line_text:
-                        start_found = True
-                    else:
-                        continue
 
                 q_match = re.match(r"^(\d+)\)\s*(.+)", line_text)
                 if q_match:
